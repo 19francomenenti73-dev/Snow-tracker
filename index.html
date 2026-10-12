@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Nowcasting Italia - Auto Lagrangian Snow Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', Arial, sans-serif; }
+        #header { background: #161b22; padding: 10px 15px; border-bottom: 2px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+        #header h1 { margin: 0; font-size: 14px; color: #58a6ff; letter-spacing: 1px; }
+        #status-bar { background: #21262d; padding: 6px 15px; font-size: 11px; font-family: monospace; border-bottom: 1px solid #30363d; color: #7ee787; display: flex; justify-content: space-between; }
+        #map { width: 100%; height: calc(100vh - 75px); background: #0d1117; }
+        
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>❄️ NOWCASTING ITALIA — AUTO TITAN SNOW TRACKER</h1>
+        <span style="font-size: 11px; color: #f0883e;">● LIVE & 3H PREDICTIVE ADVECTION</span>
+    </div>
+    <div id="status-bar">
+        <span id="time-label">Inizializzazione flusso radar autonomo...</span>
+        <span>MODALITÀ: LOOP AUTOMATICO CONTINUO</span>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { center: [42.5, 12.5], zoom: 6 });
+
+        // Base Orografica
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: 'OpenTopoMap'
+        }).addTo(map);
+
+        let radarLayers = [];
+        let currentIndex = 0;
+
+        // Caricamento automatico e avvio immediato del loop radar (Reale + Predittivo)
+        async function initAutoRadar() {
+            try {
+                const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                const data = await res.json();
+                
+                // Uniamo i dati passati (reali) e i frame predittivi (nowcast fino a ~2-3 ore)
+                const allFrames = [...data.radar.past, ...data.radar.nowcast];
+                
+                allFrames.forEach((frame, index) => {
+                    // Usiamo una palette di colori differenziata o standard (es. colore 2, palette 1)
+                    const layer = L.tileLayer(`https://tilecache.rainviewer.com${frame.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+                        opacity: 0,
+                        zIndex: 100 + index
+                    }).addTo(map);
+                    
+                    radarLayers.push({
+                        layer: layer,
+                        time: new Date(frame.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        isNowcast: index >= data.radar.past.length
+                    });
+                });
+
+                if (radarLayers.length > 0) {
+                    startAutoLoop();
+                }
+            } catch (e) {
+                document.getElementById('time-label').innerText = "Errore di connessione al flusso radar.";
+                console.error(e);
+            }
+        }
+
+        function startAutoLoop() {
+            // Esegue il loop in automatico senza alcun intervento dell'utente
+            setInterval(() => {
+                radarLayers.forEach(item => item.layer.setOpacity(0));
+                
+                currentIndex = (currentIndex + 1) % radarLayers.length;
+                const current = radarLayers[currentIndex];
+                
+                // Opacità leggermente più alta per i frame predittivi per distinguerli visivamente
+                const opacity = current.isNowcast ? 0.8 : 0.65;
+                current.layer.setOpacity(opacity);
+
+                const modeText = current.isNowcast ? "⚡ PREVISIONE PREDITTIVA (Nowcast +3h)" : "📡 DATO REALE (In atto)";
+                document.getElementById('time-label').innerText = `${modeText} — Orario: ${current.time}`;
+            }, 1000); // Scansione fluida ogni 1 secondo
+        }
+
+        initAutoRadar();
+
+        // Motore Termodinamico al click in qualsiasi punto d'Italia
+        map.on('click', async function(e) {
+            const lat = e.latlng.lat.toFixed(4);
+            const lon = e.latlng.lng.toFixed(4);
+            
+            const popup = L.popup()
+                .setLatLng(e.latlng)
+                .setContent('<div style="font-family: monospace;">Analisi termodinamica in corso...</div>')
+                .openOn(map);
+
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation&hourly=freezing_level_height`;
+                const res = await fetch(url);
+                const d = await res.json();
+
+                const t2m = d.current.temperature_2m;
+                const td = d.current.dew_point_2m;
+                const rh = d.current.relative_humidity_2m;
+                const prec = d.current.precipitation;
+                const elevation = d.elevation || 0;
+                const freezingLevel = d.hourly.freezing_level_height[0] || 1500;
+
+                const estimatedSnowLevel = Math.max(0, freezingLevel - (200 + 1.5 * (100 - rh)));
+
+                let cellStatus = "NESSUNA PRECIPITAZIONE RILEVATA";
+                let color = "#8b949e";
+
+                if (prec > 0) {
+                    if (td <= 0 && elevation >= estimatedSnowLevel) {
+                        cellStatus = "❄️ NEVE IN ATTO / ATTECCHIMENTO";
+                        color = "#2ea043";
+                    } else if (td <= 1.5 && elevation >= (estimatedSnowLevel - 200)) {
+                        cellStatus = "🌧️/❄️ NEVE MISTA (TRANSIZIONE)";
+                        color = "#d29922";
+                    } else {
+                        cellStatus = "🌧️ PIOGGIA";
+                        color = "#f85149";
+                    }
+                }
+
+                popup.setContent(`
+                    <div style="font-family: monospace; line-height: 1.4;">
+                        <b style="color: ${color}; font-size: 13px;">${cellStatus}</b><hr style="border-color:#30363d; margin:5px 0;">
+                        <b>Coordinate:</b> ${lat}, ${lon}<br>
+                        <b>Altitudine Suolo:</b> ${elevation} m s.l.m.<br>
+                        <b>Temp. Aria ($T_{2m}$):</b> ${t2m} °C<br>
+                        <b>Dew Point ($T_d$):</b> ${td} °C<br>
+                        <b>Umidità:</b> ${rh} %<br>
+                        <b>Quota Neve Stimata:</b> ~${Math.round(estimatedSnowLevel)} m
+                    </div>
+                `);
+
+            } catch (err) {
+                popup.setContent("Errore nel recupero parametri per la posizione.");
+            }
+        });
+    </script>
+</body>
+</html>

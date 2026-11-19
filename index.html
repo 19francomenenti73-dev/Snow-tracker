@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -11,7 +12,6 @@
         #header h1 { margin: 0; font-size: 14px; color: #58a6ff; letter-spacing: 1px; }
         #status-bar { background: #21262d; padding: 6px 15px; font-size: 11px; font-family: monospace; border-bottom: 1px solid #30363d; color: #7ee787; display: flex; justify-content: space-between; }
         #map { width: 100%; height: calc(100vh - 75px); background: #0d1117; }
-        
         .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; }
     </style>
 </head>
@@ -33,7 +33,7 @@
         // Base Orografica
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             maxZoom: 17,
-            attribution: 'OpenTopoMap'
+            attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> | Map style: &copy; <a href="https://opentopomap.org/">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA</a>)'
         }).addTo(map);
 
         let radarLayers = [];
@@ -44,17 +44,18 @@
             try {
                 const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
                 const data = await res.json();
-                
+
                 // Uniamo i dati passati (reali) e i frame predittivi (nowcast fino a ~2-3 ore)
                 const allFrames = [...data.radar.past, ...data.radar.nowcast];
-                
+
                 allFrames.forEach((frame, index) => {
                     // Usiamo una palette di colori differenziata o standard (es. colore 2, palette 1)
                     const layer = L.tileLayer(`https://tilecache.rainviewer.com${frame.path}/256/{z}/{x}/{y}/2/1_1.png`, {
                         opacity: 0,
-                        zIndex: 100 + index
+                        zIndex: 100 + index,
+                        attribution: 'Weather data by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener noreferrer">RainViewer</a>'
                     }).addTo(map);
-                    
+
                     radarLayers.push({
                         layer: layer,
                         time: new Date(frame.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -75,10 +76,10 @@
             // Esegue il loop in automatico senza alcun intervento dell'utente
             setInterval(() => {
                 radarLayers.forEach(item => item.layer.setOpacity(0));
-                
+
                 currentIndex = (currentIndex + 1) % radarLayers.length;
                 const current = radarLayers[currentIndex];
-                
+
                 // Opacità leggermente più alta per i frame predittivi per distinguerli visivamente
                 const opacity = current.isNowcast ? 0.8 : 0.65;
                 current.layer.setOpacity(opacity);
@@ -94,7 +95,7 @@
         map.on('click', async function(e) {
             const lat = e.latlng.lat.toFixed(4);
             const lon = e.latlng.lng.toFixed(4);
-            
+
             const popup = L.popup()
                 .setLatLng(e.latlng)
                 .setContent('<div style="font-family: monospace;">Analisi termodinamica in corso...</div>')
@@ -138,7 +139,8 @@
                         <b>Temp. Aria ($T_{2m}$):</b> ${t2m} °C<br>
                         <b>Dew Point ($T_d$):</b> ${td} °C<br>
                         <b>Umidità:</b> ${rh} %<br>
-                        <b>Quota Neve Stimata:</b> ~${Math.round(estimatedSnowLevel)} m
+                        <b>Quota Neve Stimata:</b> ~${Math.round(estimatedSnowLevel)} m<br>
+                        <small>Dati meteo: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> — <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></small>
                     </div>
                 `);
 
